@@ -59,9 +59,10 @@ USER bizpilot
 # Expose the FastAPI port
 EXPOSE 8000
 
-# Health check — Railway uses this to confirm the app is running
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD python -c "import httpx; httpx.get('http://localhost:8000/').raise_for_status()"
+# Health check — Railway uses its own healthcheck config from railway.toml,
+# so this is only for standalone Docker runs
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD python -c "import httpx, os; httpx.get(f'http://localhost:{os.environ.get(\"PORT\", 8000)}/').raise_for_status()"
 
 # Production start command
 CMD ["python", "-m", "uvicorn", "app.main:app", \
