@@ -1,0 +1,18 @@
+# ================================================================
+# BizPilot NG — Railway Configuration
+# Docs: https://docs.railway.app/reference/config-as-code
+# ================================================================
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2 --log-level info"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Railway injects $PORT automatically — uvicorn reads it above
+# All other env vars must be set in Railway's Variables tab
