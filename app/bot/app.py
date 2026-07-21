@@ -23,6 +23,7 @@ from loguru import logger
 from app.core.config import settings
 from app.bot.handlers.common import (
     build_onboarding_handler,
+    build_profile_update_handler,
     help_handler,
     cancel_handler,
     profile_handler,
@@ -54,6 +55,7 @@ def build_bot_app() -> Application:
 
     # ── Conversation handlers (highest priority) ──────────────────
     app.add_handler(build_onboarding_handler())
+    app.add_handler(build_profile_update_handler())
     app.add_handler(build_invoice_handler())
     app.add_handler(build_proposal_handler())
     app.add_handler(build_contract_handler())

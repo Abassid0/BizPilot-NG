@@ -31,6 +31,8 @@ from app.core.constants import (
     ONBOARD_NAME,
     ONBOARD_BIZ_NAME,
     ONBOARD_BIZ_TYPE,
+    PROFILE_FIELD,
+    PROFILE_VALUE,
     DOC_TYPE_LABELS,
     SubscriptionTier,
 )
@@ -40,6 +42,7 @@ from app.bot.keyboards.menus import (
     upgrade_keyboard,
     back_to_main_keyboard,
     history_action_keyboard,
+    profile_field_keyboard,
 )
 from app.db.client import (
     get_or_create_user,
@@ -295,6 +298,118 @@ async def history_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.callback_query.edit_message_text(
             text, parse_mode=ParseMode.MARKDOWN, reply_markup=main_menu_keyboard()
         )
+
+
+# ── Profile Update Flow ──────────────────────────────────────────────────────
+
+PROFILE_FIELD_LABELS = {
+    "business_name":  "Business Name",
+    "business_type":  "Business Type",
+    "bank_name":      "Bank Name",
+    "account_number": "Account Number",
+    "account_name":   "Account Name",
+    "cac_number":     "CAC Registration Number",
+    "tin_number":     "TIN Number",
+}
+
+
+async def profile_update_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "✏️ *Update Profile*\n\nWhich field would you like to update?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=profile_field_keyboard(),
+    )
+    return PROFILE_FIELD
+
+
+async def profile_field_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    field = query.data.replace("pfield:", "")
+    context.user_data["profile_update_field"] = field
+    label = PROFILE_FIELD_LABELS.get(field, field)
+
+    if field == "business_type":
+        await query.edit_message_text(
+            f"Select your new *{label}*:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=business_type_keyboard(),
+        )
+        return PROFILE_VALUE
+
+    await query.edit_message_text(
+        f"Please type your new *{label}*:",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return PROFILE_VALUE
+
+
+async def profile_value_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    value = update.message.text.strip()
+    field = context.user_data.get("profile_update_field", "")
+    label = PROFILE_FIELD_LABELS.get(field, field)
+    tg_id = update.effective_user.id
+
+    profile = await get_business_profile(tg_id)
+    profile[field] = value
+    await save_business_profile(tg_id, profile)
+
+    await update.message.reply_text(
+        f"✅ *{label}* updated to: {value}\n\nWould you like to update anything else?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=profile_field_keyboard(),
+    )
+    return PROFILE_FIELD
+
+
+async def profile_value_biztype(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    biz_type = query.data.replace("biztype:", "")
+    tg_id = update.effective_user.id
+
+    profile = await get_business_profile(tg_id)
+    profile["business_type"] = biz_type
+    await save_business_profile(tg_id, profile)
+
+    await query.edit_message_text(
+        f"✅ *Business Type* updated to: {biz_type}\n\nWould you like to update anything else?",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=profile_field_keyboard(),
+    )
+    return PROFILE_FIELD
+
+
+async def profile_update_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await profile_handler(update, context)
+    return ConversationHandler.END
+
+
+def build_profile_update_handler() -> ConversationHandler:
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(profile_update_start, pattern="^profile:update$")],
+        states={
+            PROFILE_FIELD: [
+                CallbackQueryHandler(profile_field_selected, pattern="^pfield:"),
+                CallbackQueryHandler(profile_update_back, pattern="^menu:profile$"),
+            ],
+            PROFILE_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, profile_value_text),
+                CallbackQueryHandler(profile_value_biztype, pattern="^biztype:"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel_handler),
+            CallbackQueryHandler(profile_update_back, pattern="^menu:profile$"),
+        ],
+        per_message=False,
+    )
 
 
 # ── Menu Navigation Callbacks ─────────────────────────────────────────────────

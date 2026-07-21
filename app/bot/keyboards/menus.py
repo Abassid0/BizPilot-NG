@@ -196,6 +196,31 @@ def yes_no_keyboard(yes_data: str, no_data: str) -> InlineKeyboardMarkup:
     ])
 
 
+# ── Profile Update Field Selection ───────────────────────────────────────────
+
+def profile_field_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🏢 Business Name", callback_data="pfield:business_name"),
+            InlineKeyboardButton("🏭 Business Type", callback_data="pfield:business_type"),
+        ],
+        [
+            InlineKeyboardButton("🏦 Bank Name",     callback_data="pfield:bank_name"),
+            InlineKeyboardButton("💳 Account No.",    callback_data="pfield:account_number"),
+        ],
+        [
+            InlineKeyboardButton("👤 Account Name",  callback_data="pfield:account_name"),
+            InlineKeyboardButton("📋 CAC Number",    callback_data="pfield:cac_number"),
+        ],
+        [
+            InlineKeyboardButton("🔑 TIN Number",    callback_data="pfield:tin_number"),
+        ],
+        [
+            InlineKeyboardButton("🔙 Back to Profile", callback_data="menu:profile"),
+        ],
+    ])
+
+
 # ── Back to Main ─────────────────────────────────────────────────────────────
 
 def back_to_main_keyboard() -> InlineKeyboardMarkup:

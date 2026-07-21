@@ -189,6 +189,10 @@ BIZPLAN_REVENUE     = 62
 BIZPLAN_PURPOSE     = 63
 BIZPLAN_CONFIRM     = 64
 
+# Profile Update
+PROFILE_FIELD       = 70
+PROFILE_VALUE       = 71
+
 
 # ── Output Formats ──────────────────────────────────────────────────────────
 
