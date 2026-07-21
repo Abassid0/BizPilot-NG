@@ -41,7 +41,7 @@ from app.core.constants import (
     # BizPlan states
     BIZPLAN_DESC, BIZPLAN_MARKET, BIZPLAN_REVENUE,
     BIZPLAN_PURPOSE, BIZPLAN_CONFIRM,
-    DocType, OutputFormat, SubscriptionTier,
+    DocType, OutputFormat, SubscriptionTier, DOC_TYPE_LABELS,
 )
 from app.bot.keyboards.menus import (
     contract_type_keyboard,
@@ -95,51 +95,63 @@ async def _deliver_document(
     user_input: dict,
 ) -> None:
     """Common delivery logic for all document types."""
+    import io as _io
+    from datetime import datetime, timezone
     tier     = SubscriptionTier(user.get("subscription", "free"))
     is_free  = tier == SubscriptionTier.FREE
-    fmt      = OutputFormat.TEXT if is_free else OutputFormat.PDF
+    msg = update.callback_query.message if update.callback_query else update.message
+    label = DOC_TYPE_LABELS.get(doc_type, doc_type)
 
-    doc_bytes = await DocumentGenerator.generate(
+    plain = DocumentGenerator._to_plain_text(doc_type, result["data"])
+    chunks = [plain[i:i+4000] for i in range(0, len(plain), 4000)]
+    for i, chunk in enumerate(chunks):
+        if i == 0 and update.callback_query:
+            await update.callback_query.edit_message_text(
+                f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await msg.reply_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
+
+    docx_bytes = await DocumentGenerator.generate(
         doc_type=doc_type,
         ai_data=result["data"],
-        output_format=fmt,
+        output_format=OutputFormat.DOCX,
         subscription_tier=tier,
     )
+    if docx_bytes:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d")
+        filename = f"BizPilot_{doc_type}_{ts}.docx"
+        await msg.reply_document(
+            document=_io.BytesIO(docx_bytes),
+            filename=filename,
+            caption=f"📎 {label} — tap to download",
+        )
+
+    file_url = None
+    if not is_free:
+        pdf_bytes = await DocumentGenerator.generate(
+            doc_type=doc_type,
+            ai_data=result["data"],
+            output_format=OutputFormat.PDF,
+            subscription_tier=tier,
+        )
+        if pdf_bytes:
+            file_url = await upload_document(user["id"], doc_type, pdf_bytes, OutputFormat.PDF)
 
     await increment_doc_count(update.effective_user.id)
-    file_url = None
 
-    if fmt == OutputFormat.TEXT or doc_bytes is None:
-        plain = DocumentGenerator._to_plain_text(doc_type, result["data"])
-        chunks = [plain[i:i+4000] for i in range(0, len(plain), 4000)]
-        msg = update.callback_query.message if update.callback_query else update.message
-        for i, chunk in enumerate(chunks):
-            if i == 0 and update.callback_query:
-                await update.callback_query.edit_message_text(
-                    f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await msg.reply_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
-
-        if is_free:
-            msg2 = update.callback_query.message if update.callback_query else update.message
-            await msg2.reply_text(
-                "💡 *Upgrade to Pro* for professional PDF downloads.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=back_to_main_keyboard(),
-            )
+    if is_free:
+        await msg.reply_text(
+            "💡 *Upgrade to Pro* for professional PDF downloads with branding.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=back_to_main_keyboard(),
+        )
     else:
-        file_url = await upload_document(user["id"], doc_type, doc_bytes, fmt)
-        if file_url:
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            await update.callback_query.edit_message_text(
-                f"✅ *Document Ready!*\n\nYour PDF is ready to download.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download PDF", url=file_url)],
-                    [InlineKeyboardButton("🏠 Main Menu", callback_data="menu:main")],
-                ]),
-            )
+        await msg.reply_text(
+            "✅ *Document generated!*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=back_to_main_keyboard(),
+        )
 
     await save_document(
         user_id=user["id"],
@@ -147,7 +159,7 @@ async def _deliver_document(
         input_data=user_input,
         output_text=result["raw_text"],
         file_url=file_url,
-        output_format=fmt,
+        output_format=OutputFormat.DOCX,
     )
 
 

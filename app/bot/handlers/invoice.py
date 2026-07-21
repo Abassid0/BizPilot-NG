@@ -222,68 +222,70 @@ async def invoice_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return ConversationHandler.END
 
+    import io as _io
+    from datetime import datetime, timezone
+
     tier = SubscriptionTier(user.get("subscription", "free"))
     is_free = tier == SubscriptionTier.FREE
 
-    # Determine output format based on tier
-    output_format = OutputFormat.TEXT if is_free else OutputFormat.PDF
+    # Always show text preview in chat
+    plain_text = DocumentGenerator._invoice_to_text(result["data"])
+    chunks = _chunk_text(plain_text, 4000)
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            await query.edit_message_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
+        else:
+            await query.message.reply_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
 
-    doc_bytes = await DocumentGenerator.generate(
+    # Send downloadable DOCX for all tiers
+    docx_bytes = await DocumentGenerator.generate(
         doc_type=DocType.INVOICE,
         ai_data=result["data"],
-        output_format=output_format,
+        output_format=OutputFormat.DOCX,
         subscription_tier=tier,
     )
-
-    # Increment usage counter
-    await increment_doc_count(tg_id)
+    if docx_bytes:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d")
+        filename = f"BizPilot_Invoice_{ts}.docx"
+        await query.message.reply_document(
+            document=_io.BytesIO(docx_bytes),
+            filename=filename,
+            caption="📎 Invoice — tap to download",
+        )
 
     file_url = None
+    if not is_free:
+        pdf_bytes = await DocumentGenerator.generate(
+            doc_type=DocType.INVOICE,
+            ai_data=result["data"],
+            output_format=OutputFormat.PDF,
+            subscription_tier=tier,
+        )
+        if pdf_bytes:
+            file_url = await upload_document(user["id"], DocType.INVOICE, pdf_bytes, OutputFormat.PDF)
 
-    if output_format == OutputFormat.TEXT or doc_bytes is None:
-        # Send as formatted text in chat
-        plain_text = DocumentGenerator._invoice_to_text(result["data"])
-        # Telegram has 4096 char limit — split if needed
-        chunks = _chunk_text(plain_text, 4000)
-        for i, chunk in enumerate(chunks):
-            if i == 0:
-                await query.edit_message_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
-            else:
-                await query.message.reply_text(f"```\n{chunk}\n```", parse_mode=ParseMode.MARKDOWN)
+    await increment_doc_count(tg_id)
 
-        if is_free:
-            await query.message.reply_text(
-                "💡 *Upgrade to Pro* to download professional PDF invoices with your branding.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=back_to_main_keyboard(),
-            )
+    if is_free:
+        await query.message.reply_text(
+            "💡 *Upgrade to Pro* for professional PDF invoices with your branding.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=back_to_main_keyboard(),
+        )
     else:
-        # Upload PDF and send download link
-        file_url = await upload_document(user["id"], DocType.INVOICE, doc_bytes, output_format)
+        await query.message.reply_text(
+            "✅ *Invoice generated!*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=back_to_main_keyboard(),
+        )
 
-        if file_url:
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            await query.edit_message_text(
-                "✅ *Invoice Generated!*\n\nYour professional PDF invoice is ready.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download Invoice PDF", url=file_url)],
-                    [InlineKeyboardButton("🏠 Main Menu", callback_data="menu:main")],
-                ]),
-            )
-        else:
-            # Fallback to text if upload fails
-            plain_text = DocumentGenerator._invoice_to_text(result["data"])
-            await query.edit_message_text(f"```\n{plain_text[:4000]}\n```", parse_mode=ParseMode.MARKDOWN)
-
-    # Save document to history
     await save_document(
         user_id=user["id"],
         doc_type=DocType.INVOICE,
         input_data=user_data,
         output_text=result["raw_text"],
         file_url=file_url,
-        output_format=output_format,
+        output_format=OutputFormat.DOCX,
     )
 
     context.user_data.clear()
