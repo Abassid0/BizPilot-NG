@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # --- Anthropic ---
     anthropic_api_key: str = Field(...)
+    anthropic_base_url: str = ""
     claude_model: str = "claude-sonnet-4-20250514"
     claude_max_tokens: int = 2000
 

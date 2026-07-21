@@ -37,7 +37,10 @@ _client: Optional[anthropic.AsyncAnthropic] = None
 def get_claude_client() -> anthropic.AsyncAnthropic:
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        kwargs: dict = {"api_key": settings.anthropic_api_key}
+        if settings.anthropic_base_url:
+            kwargs["base_url"] = settings.anthropic_base_url
+        _client = anthropic.AsyncAnthropic(**kwargs)
     return _client
 
 
