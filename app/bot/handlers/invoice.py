@@ -42,6 +42,7 @@ from app.db.client import (
     get_business_profile,
     check_usage_limit,
     increment_doc_count,
+    check_and_send_usage_warning,
     save_document,
 )
 from app.services.ai.claude_client import generate_document
@@ -265,6 +266,7 @@ async def invoice_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             file_url = await upload_document(user["id"], DocType.INVOICE, pdf_bytes, OutputFormat.PDF)
 
     await increment_doc_count(tg_id)
+    await check_and_send_usage_warning(tg_id)
 
     if is_free:
         await query.message.reply_text(

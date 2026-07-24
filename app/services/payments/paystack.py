@@ -50,11 +50,10 @@ async def initialize_subscription(
         }
     or None on failure.
     """
-    amount_kobo = (
-        settings.pro_price_kobo
-        if tier == SubscriptionTier.PRO
-        else settings.commander_price_kobo
-    )
+    if tier == SubscriptionTier.PRO:
+        amount_kobo = settings.pro_price_kobo
+    else:
+        amount_kobo = settings.business_price_kobo
 
     payload = {
         "email":    email,
@@ -209,6 +208,7 @@ def get_plan_code(tier: SubscriptionTier) -> Optional[str]:
     """Return the correct Paystack plan code for a subscription tier."""
     plans = {
         SubscriptionTier.PRO:       settings.paystack_pro_plan_code,
+        SubscriptionTier.BUSINESS:  settings.paystack_commander_plan_code,
         SubscriptionTier.COMMANDER: settings.paystack_commander_plan_code,
     }
     return plans.get(tier)

@@ -22,7 +22,7 @@ from loguru import logger
 from telegram import Update
 
 from app.core.config import settings
-from app.db.client import confirm_payment, get_payment_by_ref, get_user_by_telegram_id
+from app.db.client import confirm_payment, get_payment_by_ref, get_user_by_telegram_id, downgrade_user_to_free
 from app.services.payments.paystack import verify_webhook_signature, verify_transaction
 
 router = APIRouter(tags=["webhooks"])
@@ -94,7 +94,7 @@ async def paystack_webhook(request: Request) -> Response:
         await _handle_subscription_disabled(data, request)
 
     elif event_type == "invoice.payment_failed":
-        logger.warning(f"Payment failed for subscription: {data.get('subscription', {}).get('subscription_code')}")
+        await _handle_payment_failed(data, request)
 
     # Always return 200 to Paystack — retries happen if we return 4xx/5xx
     return Response(status_code=200)
@@ -123,15 +123,26 @@ async def _handle_charge_success(data: dict, request: Request) -> None:
         logger.error(f"confirm_payment returned None for ref={reference}")
         return
 
-    # Send Telegram confirmation to the user
+    tier_label = "Pro Operator" if amount_kobo < settings.commander_price_kobo else "Business Commander"
+
+    if email:
+        from app.services.payments.paystack import format_naira, kobo_to_naira
+        from app.services.payments.email import send_payment_confirmation
+        await send_payment_confirmation(
+            to=email,
+            name=email.split("@")[0],
+            plan_name=tier_label,
+            amount=format_naira(kobo_to_naira(amount_kobo)),
+            reference=reference,
+        )
+
     if telegram_id:
         try:
             bot_app = request.app.state.bot_app
-            tier_label = "Pro Operator ⚡" if amount_kobo < settings.commander_price_kobo else "Business Commander 🏆"
             await bot_app.bot.send_message(
                 chat_id=int(telegram_id),
                 text=(
-                    f"🎉 *Payment Confirmed!*\n\n"
+                    f"*Payment Confirmed!*\n\n"
                     f"Your *{tier_label}* subscription is now active.\n"
                     f"You now have unlimited document generation.\n\n"
                     f"Reference: `{reference}`\n\n"
@@ -145,9 +156,69 @@ async def _handle_charge_success(data: dict, request: Request) -> None:
 
 async def _handle_subscription_disabled(data: dict, request: Request) -> None:
     """Downgrade user to free tier when subscription is cancelled."""
-    from app.db.client import supabase
     customer_code = data.get("customer", {}).get("customer_code")
+    email = data.get("customer", {}).get("email", "")
     logger.info(f"Subscription disabled for customer: {customer_code}")
 
-    # In a full implementation you'd look up the user by customer_code
-    # For MVP, log and handle manually if needed
+    metadata = data.get("metadata", {})
+    telegram_id = metadata.get("telegram_id")
+
+    if not telegram_id:
+        subscription = data.get("subscription", {})
+        sub_meta = subscription.get("metadata", {})
+        telegram_id = sub_meta.get("telegram_id")
+
+    if not telegram_id:
+        logger.warning(f"No telegram_id in subscription.disable event for {customer_code}")
+        return
+
+    telegram_id = int(telegram_id)
+    user = await get_user_by_telegram_id(telegram_id)
+    if not user:
+        logger.warning(f"User not found for telegram_id={telegram_id} during subscription disable")
+        return
+
+    await downgrade_user_to_free(telegram_id)
+    logger.info(f"User {telegram_id} downgraded to free tier after subscription cancellation")
+
+    try:
+        bot_app = request.app.state.bot_app
+        await bot_app.bot.send_message(
+            chat_id=telegram_id,
+            text=(
+                "Your subscription has been cancelled.\n\n"
+                "You've been moved to the *Starter (Free)* plan with 5 documents per month.\n\n"
+                "Type /upgrade anytime to resubscribe."
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user {telegram_id} of cancellation: {e}")
+
+
+async def _handle_payment_failed(data: dict, request: Request) -> None:
+    """Notify user when a subscription renewal payment fails."""
+    subscription = data.get("subscription", {})
+    sub_code = subscription.get("subscription_code", "unknown")
+    metadata = data.get("metadata", {}) or subscription.get("metadata", {})
+    telegram_id = metadata.get("telegram_id")
+
+    logger.warning(f"Payment failed for subscription: {sub_code}, telegram_id={telegram_id}")
+
+    if not telegram_id:
+        return
+
+    try:
+        bot_app = request.app.state.bot_app
+        await bot_app.bot.send_message(
+            chat_id=int(telegram_id),
+            text=(
+                "Your subscription renewal payment failed.\n\n"
+                "Please update your payment method to keep your plan active. "
+                "Your subscription will be cancelled if the next retry also fails.\n\n"
+                "Type /upgrade to set up a new payment."
+            ),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error(f"Failed to notify user {telegram_id} of payment failure: {e}")

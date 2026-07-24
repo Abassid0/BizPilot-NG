@@ -54,8 +54,11 @@ class Settings(BaseSettings):
     paystack_pro_plan_code: str = ""
     paystack_commander_plan_code: str = ""
 
-    # --- Redis ---
-    redis_url: str = "redis://localhost:6379/0"
+    # --- WhatsApp Business API ---
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_verify_token: str = ""
+    whatsapp_app_secret: str = ""
 
     # --- Email ---
     resend_api_key: str = ""
@@ -63,13 +66,15 @@ class Settings(BaseSettings):
     email_from_name: str = "BizPilot NG"
 
     # --- Subscription limits ---
-    free_monthly_limit: int = 5
+    free_monthly_limit: int = 50
     pro_monthly_limit: int = 999999
-    commander_monthly_limit: int = 999999
+    business_monthly_limit: int = 999999
+    commander_monthly_limit: int = 999999  # legacy alias
 
     # --- Pricing (kobo) ---
-    pro_price_kobo: int = 499900       # ₦4,999
-    commander_price_kobo: int = 1299900  # ₦12,999
+    pro_price_kobo: int = 500000         # ₦5,000
+    business_price_kobo: int = 1500000   # ₦15,000
+    commander_price_kobo: int = 1500000  # legacy alias
 
     @property
     def webhook_url(self) -> str:

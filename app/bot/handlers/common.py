@@ -129,6 +129,14 @@ async def onboard_biz_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=main_menu_keyboard(),
     )
+
+    user = await get_user_by_telegram_id(tg_id)
+    email = user.get("email") if user else None
+    if email:
+        from app.services.payments.email import send_welcome_email
+        name = context.user_data.get("onboard_name", "there")
+        await send_welcome_email(email, name)
+
     return ConversationHandler.END
 
 
@@ -215,12 +223,13 @@ async def upgrade_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def upgrade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles upgrade:pro and upgrade:commander button taps."""
+    """Handles upgrade:pro and upgrade:business button taps."""
     query = update.callback_query
     await query.answer()
 
     tier_key = query.data.replace("upgrade:", "")
-    tier = SubscriptionTier.PRO if tier_key == "pro" else SubscriptionTier.COMMANDER
+    tier_map = {"pro": SubscriptionTier.PRO, "business": SubscriptionTier.BUSINESS, "commander": SubscriptionTier.BUSINESS}
+    tier = tier_map.get(tier_key, SubscriptionTier.PRO)
 
     tg_id = update.effective_user.id
     user  = await get_user_by_telegram_id(tg_id)
@@ -254,7 +263,7 @@ async def upgrade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    plan_name = "Pro Operator ⚡" if tier == SubscriptionTier.PRO else "Business Commander 🏆"
+    plan_name = "Pro ⚡" if tier == SubscriptionTier.PRO else "Business 🏢"
     await query.edit_message_text(
         f"💳 *{plan_name} Subscription*\n\n"
         f"Tap the button below to complete payment securely via Paystack.\n\n"

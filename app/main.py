@@ -26,6 +26,8 @@ import uvicorn
 from app.core.config import settings
 from app.api.routes.webhooks import router as webhook_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.automation import router as automation_router
+from app.api.routes.whatsapp import router as whatsapp_router
 
 
 @asynccontextmanager
@@ -93,6 +95,8 @@ def create_app() -> FastAPI:
     # ── API Routes ────────────────────────────────────────────────
     app.include_router(webhook_router)
     app.include_router(dashboard_router)
+    app.include_router(automation_router)
+    app.include_router(whatsapp_router)
 
     # ── Serve web dashboard static files ─────────────────────────
     # The built dashboard sits in /dashboard/dist

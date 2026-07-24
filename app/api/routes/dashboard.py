@@ -12,22 +12,34 @@ Users arrive at the dashboard via a magic link sent from the bot.
 from __future__ import annotations
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends, Header
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.db.client import (
     get_user_by_telegram_id,
     get_user_documents,
     get_business_profile,
     save_business_profile,
     update_user_profile,
+    get_expense_summary,
+    get_income_summary,
+    get_user_expenses,
 )
 from app.core.constants import SubscriptionTier, TIER_LABELS, TIER_PRICES_NAIRA, DOC_TYPE_LABELS
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
 
 
-# ── Auth Helper ───────────────────────────────────────────────────────────────
+# ── Auth ─────────────────────────────────────────────────────────────────────
+
+async def verify_api_key(authorization: str = Header(..., alias="Authorization")) -> None:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = authorization.removeprefix("Bearer ").strip()
+    if token != settings.secret_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
 
 async def _get_user_or_404(telegram_id: int) -> dict:
     user = await get_user_by_telegram_id(telegram_id)
@@ -53,7 +65,7 @@ class ProfileUpdateRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/user/{telegram_id}")
+@router.get("/user/{telegram_id}", dependencies=[Depends(verify_api_key)])
 async def get_user(telegram_id: int):
     """
     Return the full user profile including subscription status.
@@ -82,7 +94,7 @@ async def get_user(telegram_id: int):
     }
 
 
-@router.put("/user/{telegram_id}/profile")
+@router.put("/user/{telegram_id}/profile", dependencies=[Depends(verify_api_key)])
 async def update_profile(telegram_id: int, body: ProfileUpdateRequest):
     """
     Update a user's business profile from the web dashboard.
@@ -106,7 +118,7 @@ async def update_profile(telegram_id: int, body: ProfileUpdateRequest):
     return {"success": True, "profile": merged}
 
 
-@router.get("/user/{telegram_id}/documents")
+@router.get("/user/{telegram_id}/documents", dependencies=[Depends(verify_api_key)])
 async def get_documents(
     telegram_id: int,
     limit: int = Query(default=20, le=50),
@@ -137,7 +149,7 @@ async def get_documents(
     }
 
 
-@router.get("/user/{telegram_id}/stats")
+@router.get("/user/{telegram_id}/stats", dependencies=[Depends(verify_api_key)])
 async def get_stats(telegram_id: int):
     """
     Dashboard summary stats — document counts by type, usage this month.
@@ -168,46 +180,97 @@ async def get_plans():
                 "tier":        "free",
                 "label":       "Starter",
                 "price_naira": 0,
-                "docs_limit":  5,
+                "docs_limit":  50,
                 "features":    [
-                    "5 documents per month",
-                    "All 6 document types",
+                    "50 transactions per month",
+                    "All document types",
+                    "Basic expense tracking",
                     "In-chat text preview",
-                    "Nigerian formatting",
                 ],
                 "cta": "Current Plan",
             },
             {
                 "tier":        "pro",
-                "label":       "Pro Operator",
-                "price_naira": 4999,
+                "label":       "Pro",
+                "price_naira": 5000,
                 "docs_limit":  999999,
                 "features":    [
-                    "Unlimited documents",
+                    "Unlimited transactions",
                     "PDF & DOCX downloads",
-                    "No watermarks",
-                    "Priority generation",
-                    "Document history (1 year)",
+                    "Tax compliance & insights",
+                    "AI business reports",
+                    "Receipt OCR scanning",
                 ],
                 "cta": "Upgrade to Pro",
                 "popular": True,
             },
             {
-                "tier":        "commander",
-                "label":       "Business Commander",
-                "price_naira": 12999,
+                "tier":        "business",
+                "label":       "Business",
+                "price_naira": 15000,
                 "docs_limit":  999999,
                 "features":    [
                     "Everything in Pro",
-                    "Custom logo on documents",
-                    "3 team member seats",
-                    "Dedicated support",
-                    "Bulk document generation",
+                    "Multi-user team seats",
+                    "Accountant access",
+                    "API access",
+                    "Priority support",
                 ],
-                "cta": "Upgrade to Commander",
+                "cta": "Upgrade to Business",
+            },
+            {
+                "tier":        "enterprise",
+                "label":       "Enterprise",
+                "price_naira": 0,
+                "docs_limit":  999999,
+                "features":    [
+                    "Everything in Business",
+                    "White-label for accounting firms",
+                    "Custom integrations",
+                    "Dedicated account manager",
+                ],
+                "cta": "Contact Sales",
             },
         ]
     }
+
+
+@router.get("/user/{telegram_id}/finances", dependencies=[Depends(verify_api_key)])
+async def get_finances(
+    telegram_id: int,
+    year: Optional[int] = Query(default=None),
+    month: Optional[int] = Query(default=None),
+):
+    """Financial summary — expenses and income for a given period."""
+    from datetime import datetime, timezone
+    user = await _get_user_or_404(telegram_id)
+
+    if not year or not month:
+        now = datetime.now(timezone.utc)
+        year, month = now.year, now.month
+
+    expenses = await get_expense_summary(user["id"], year=year, month=month)
+    income = await get_income_summary(user["id"], year=year, month=month)
+
+    return {
+        "period": f"{year}-{month:02d}",
+        "income": income,
+        "expenses": expenses,
+        "net_profit": income["total"] - expenses["total"],
+    }
+
+
+@router.get("/user/{telegram_id}/expenses", dependencies=[Depends(verify_api_key)])
+async def list_expenses(
+    telegram_id: int,
+    limit: int = Query(default=20, le=100),
+    year: Optional[int] = Query(default=None),
+    month: Optional[int] = Query(default=None),
+):
+    """List expenses for a user, optionally filtered by period."""
+    user = await _get_user_or_404(telegram_id)
+    expenses = await get_user_expenses(user["id"], limit=limit, year=year, month=month)
+    return {"expenses": expenses, "total": len(expenses)}
 
 
 @router.get("/health")

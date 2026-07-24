@@ -352,9 +352,9 @@ class TestConstants:
         for tier in SubscriptionTier:
             assert tier in TIER_LIMITS, f"{tier} missing from TIER_LIMITS"
 
-    def test_free_tier_limit_is_five(self):
+    def test_free_tier_limit_is_fifty(self):
         from app.core.constants import TIER_LIMITS
-        assert TIER_LIMITS[SubscriptionTier.FREE] == 5
+        assert TIER_LIMITS[SubscriptionTier.FREE] == 50
 
     def test_pro_tier_limit_is_effectively_unlimited(self):
         from app.core.constants import TIER_LIMITS
@@ -378,6 +378,11 @@ class TestConstants:
             REPLY_CONTEXT, REPLY_ISSUE, REPLY_TONE, REPLY_CONFIRM,
             BIZPLAN_DESC, BIZPLAN_MARKET, BIZPLAN_REVENUE,
             BIZPLAN_PURPOSE, BIZPLAN_CONFIRM,
+            EXP_AMOUNT, EXP_DESCRIPTION, EXP_CATEGORY,
+            EXP_VENDOR, EXP_DATE, EXP_CONFIRM,
+            DASH_QUERY,
+            TEAM_CREATE_NAME, TEAM_INVITE_ROLE,
+            LANG_SELECT,
         )
         all_states = [
             ONBOARD_NAME, ONBOARD_BIZ_NAME, ONBOARD_BIZ_TYPE,
@@ -391,6 +396,11 @@ class TestConstants:
             REPLY_CONTEXT, REPLY_ISSUE, REPLY_TONE, REPLY_CONFIRM,
             BIZPLAN_DESC, BIZPLAN_MARKET, BIZPLAN_REVENUE,
             BIZPLAN_PURPOSE, BIZPLAN_CONFIRM,
+            EXP_AMOUNT, EXP_DESCRIPTION, EXP_CATEGORY,
+            EXP_VENDOR, EXP_DATE, EXP_CONFIRM,
+            DASH_QUERY,
+            TEAM_CREATE_NAME, TEAM_INVITE_ROLE,
+            LANG_SELECT,
         ]
         assert len(all_states) == len(set(all_states)), \
             "Duplicate conversation state integer found — will cause routing bugs!"

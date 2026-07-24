@@ -136,6 +136,134 @@ async def generate_document(
         }
 
 
+async def analyze_receipt_image(image_bytes: bytes, media_type: str = "image/jpeg") -> dict:
+    """
+    Extract expense data from a receipt image using Claude Vision.
+    Returns parsed JSON with amount, vendor, category, etc.
+    """
+    import base64
+    from app.services.ai.prompts import build_receipt_ocr_prompt
+
+    client = get_claude_client()
+    system_prompt = build_receipt_ocr_prompt()
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=1000,
+            system=system_prompt,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract all expense information from this receipt.",
+                    },
+                ],
+            }],
+        )
+        raw = response.content[0].text.strip()
+        parsed = _parse_json_response(raw)
+        if parsed and parsed.get("success"):
+            return parsed
+        return {"success": False, "error": "Could not read this receipt"}
+    except Exception as e:
+        logger.error(f"Receipt OCR error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def parse_quick_expense(text: str) -> Optional[dict]:
+    """Parse a natural-language expense entry using Claude."""
+    from app.services.ai.prompts import build_expense_parse_prompt
+
+    client = get_claude_client()
+    sys_prompt, user_prompt = build_expense_parse_prompt(text)
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=300,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = response.content[0].text.strip()
+        return _parse_json_response(raw)
+    except Exception as e:
+        logger.error(f"Quick expense parse error: {e}")
+        return None
+
+
+async def query_financials(query: str, financial_data: dict) -> str:
+    """Answer a natural-language financial question."""
+    from app.services.ai.prompts import build_financial_query_prompt
+
+    client = get_claude_client()
+    sys_prompt, user_prompt = build_financial_query_prompt(query, financial_data)
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=1000,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return response.content[0].text.strip()
+    except Exception as e:
+        logger.error(f"Financial query error: {e}")
+        return "Sorry, I couldn't process your financial query right now. Please try again."
+
+
+async def calculate_tax_summary(financial_data: dict) -> Optional[dict]:
+    """Generate a tax compliance summary from financial data."""
+    from app.services.ai.prompts import build_tax_summary_prompt
+
+    client = get_claude_client()
+    sys_prompt, user_prompt = build_tax_summary_prompt(financial_data)
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=1500,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = response.content[0].text.strip()
+        return _parse_json_response(raw)
+    except Exception as e:
+        logger.error(f"Tax calculation error: {e}")
+        return None
+
+
+async def generate_business_insights(financial_data: dict, report_type: str = "monthly") -> Optional[dict]:
+    """Generate AI-powered business health insights from financial data."""
+    from app.services.ai.prompts import build_insights_prompt
+
+    client = get_claude_client()
+    sys_prompt, user_prompt = build_insights_prompt(financial_data, report_type)
+
+    try:
+        response = await client.messages.create(
+            model=settings.claude_model,
+            max_tokens=1500,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        raw = response.content[0].text.strip()
+        return _parse_json_response(raw)
+    except Exception as e:
+        logger.error(f"Business insights error: {e}")
+        return None
+
+
 async def transcribe_voice(audio_bytes: bytes, file_ext: str = "ogg") -> Optional[str]:
     """
     Transcribe a voice message using OpenAI Whisper.

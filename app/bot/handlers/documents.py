@@ -56,6 +56,7 @@ from app.db.client import (
     get_business_profile,
     check_usage_limit,
     increment_doc_count,
+    check_and_send_usage_warning,
     save_document,
 )
 from app.services.ai.claude_client import generate_document, transcribe_voice
@@ -139,6 +140,7 @@ async def _deliver_document(
             file_url = await upload_document(user["id"], doc_type, pdf_bytes, OutputFormat.PDF)
 
     await increment_doc_count(update.effective_user.id)
+    await check_and_send_usage_warning(update.effective_user.id)
 
     if is_free:
         await msg.reply_text(
@@ -784,15 +786,14 @@ def build_bizplan_handler() -> ConversationHandler:
 
 async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Transcribe incoming voice notes using Whisper.
-    Then show the user what was heard and let them pick a document type.
+    Transcribe incoming voice notes using Whisper, classify via Claude,
+    and route to the matching document flow with pre-filled data.
     """
-    msg = await update.message.reply_text("🎙️ Transcribing your voice note...")
+    msg = await update.message.reply_text("Transcribing your voice note...")
 
     voice = update.message.voice
     file  = await context.bot.get_file(voice.file_id)
 
-    # Download the audio bytes
     import io as _io
     buf = _io.BytesIO()
     await file.download_to_memory(buf)
@@ -802,20 +803,63 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if not transcript:
         await msg.edit_text(
-            "⚠️ Could not transcribe your voice note.\n\n"
+            "Could not transcribe your voice note.\n\n"
             "Please type your request or use a command from /help.",
             reply_markup=back_to_main_keyboard(),
         )
         return
 
-    await msg.edit_text(
-        f"🎙️ *I heard:*\n_{transcript}_\n\n"
-        f"What would you like to create?",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=__import__(
-            "app.bot.keyboards.menus", fromlist=["main_menu_keyboard"]
-        ).main_menu_keyboard(),
-    )
-
-    # Store transcript so the next handler can pre-fill fields
     context.user_data["voice_transcript"] = transcript
+
+    from app.services.ai.prompts import build_voice_classification_prompt
+    from app.services.ai.claude_client import get_claude_client, _parse_json_response
+    from app.core.config import settings as _settings
+
+    try:
+        client = get_claude_client()
+        sys_prompt, user_prompt = build_voice_classification_prompt(transcript)
+        response = await client.messages.create(
+            model=_settings.claude_model,
+            max_tokens=500,
+            system=sys_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        classification = _parse_json_response(response.content[0].text.strip())
+    except Exception:
+        classification = None
+
+    from app.bot.keyboards.menus import main_menu_keyboard
+
+    if not classification or not classification.get("doc_type") or classification.get("confidence", 0) < 0.5:
+        await msg.edit_text(
+            f"*I heard:*\n_{transcript}_\n\n"
+            f"I couldn't determine the document type. Please pick one:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
+    doc_type = classification["doc_type"]
+    extracted = classification.get("extracted_data", {})
+    summary = classification.get("summary", "")
+
+    context.user_data.update(extracted)
+
+    doc_labels = {
+        "invoice": "Invoice", "proposal": "Business Proposal",
+        "contract": "Contract", "social_post": "Social Media Content",
+        "reply": "Customer Reply", "business_plan": "Business Plan",
+    }
+    label = doc_labels.get(doc_type, doc_type)
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await msg.edit_text(
+        f"*I heard:*\n_{transcript}_\n\n"
+        f"Detected: *{label}*\n{summary}\n\n"
+        f"Tap below to start or pick a different type:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Create {label}", callback_data=f"doc:{doc_type}")],
+            [InlineKeyboardButton("Pick another type", callback_data="menu:main")],
+        ]),
+    )

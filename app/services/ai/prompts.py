@@ -472,3 +472,195 @@ def get_prompt_builder(doc_type: DocType):
     if not builder:
         raise ValueError(f"No prompt builder for doc_type: {doc_type}")
     return builder
+
+
+# ── Receipt OCR Prompt ─────────────────────────────────────────────────────
+
+def build_receipt_ocr_prompt() -> str:
+    """System prompt for extracting expense data from receipt images via Claude Vision."""
+    return NIGERIAN_BASE_CONTEXT + """
+
+RECEIPT OCR EXTRACTION RULES:
+You are analyzing a photo of a receipt, invoice, or bill from a Nigerian business.
+Extract all relevant expense information from the image.
+
+Nigerian receipt patterns to watch for:
+- POS receipts (Moniepoint, OPay, Palmpay, Kuda, Access, GTBank terminals)
+- Paper receipts with handwritten amounts
+- Fuel station receipts (NNPC, Oando, Total, Conoil)
+- Market/store receipts
+- Utility bills (PHCN/EKEDC/IKEDC, LAWMA, water)
+- Restaurant bills / food vendor receipts
+- Transfer confirmations (bank alerts)
+
+RESPONSE FORMAT — valid JSON only, no markdown fences:
+{
+  "success": true,
+  "amount": 0.0,
+  "description": "",
+  "vendor": "",
+  "category": "",
+  "date": "YYYY-MM-DD",
+  "items": [{"name": "", "quantity": 1, "price": 0.0}],
+  "vat_amount": 0.0,
+  "payment_method": "",
+  "reference_number": "",
+  "confidence": 0.0
+}
+
+CATEGORY must be one of: Transport & Logistics, Food & Catering, Office Supplies,
+Rent & Utilities, Staff & Salaries, Marketing & Ads, Professional Services,
+Inventory & Stock, Equipment & Tools, Communication & Internet, Insurance,
+Bank Charges & Fees, Taxes & Government, Miscellaneous.
+
+If the image is not a receipt or is unreadable, set success to false and confidence to 0.
+Amount must always be in Naira. Convert if needed.
+"""
+
+
+# ── Quick Expense Parse Prompt ─────────────────────────────────────────────
+
+def build_expense_parse_prompt(text: str) -> tuple[str, str]:
+    """Parse a natural-language expense entry like 'spent 5000 on fuel'."""
+    system = NIGERIAN_BASE_CONTEXT + """
+
+EXPENSE PARSING RULES:
+Parse the user's natural language expense entry. Nigerian users may type things like:
+- "spent 5k on fuel"
+- "paid 15,000 for office rent"
+- "uber to VI 3500"
+- "bought rice 25000 from market"
+- "DSTV subscription 21000"
+- "mechanic 45k"
+
+k/K means thousands (5k = 5000). No currency symbol means Naira.
+
+RESPONSE FORMAT — valid JSON only:
+{
+  "amount": 0.0,
+  "description": "",
+  "category": "",
+  "vendor": "",
+  "confidence": 0.0
+}
+
+CATEGORY must be one of: Transport & Logistics, Food & Catering, Office Supplies,
+Rent & Utilities, Staff & Salaries, Marketing & Ads, Professional Services,
+Inventory & Stock, Equipment & Tools, Communication & Internet, Insurance,
+Bank Charges & Fees, Taxes & Government, Miscellaneous.
+"""
+    user = f'Parse this expense: "{text}"'
+    return system, user
+
+
+# ── Financial Summary Prompt ───────────────────────────────────────────────
+
+def build_financial_query_prompt(query: str, financial_data: dict) -> tuple[str, str]:
+    """Answer a natural-language financial question using the user's data."""
+    system = NIGERIAN_BASE_CONTEXT + """
+
+FINANCIAL ANALYSIS RULES:
+You are the user's AI financial advisor. Answer their question using the data provided.
+Be specific with numbers, always use Naira formatting, and keep advice practical.
+
+For Nigerian SMBs, consider:
+- VAT obligations (7.5% on revenue over threshold)
+- WHT deductions by clients
+- Common expense optimization areas
+- Cash flow patterns typical in Nigerian business
+
+Respond in plain text (NOT JSON). Be conversational but data-driven.
+Keep your response under 300 words.
+"""
+    import json
+    data_str = json.dumps(financial_data, indent=2, default=str)
+    user = f"""Here is the user's financial data:
+
+{data_str}
+
+User's question: {query}"""
+    return system, user
+
+
+# ── Tax Calculation Prompt ─────────────────────────────────────────────────
+
+def build_insights_prompt(financial_data: dict, report_type: str = "monthly") -> tuple[str, str]:
+    """Generate business health insights with trend analysis and anomaly detection."""
+    system = NIGERIAN_BASE_CONTEXT + """
+
+BUSINESS INSIGHTS ANALYST RULES:
+You are an AI business analyst for a Nigerian SMB. Analyze the financial data and produce
+actionable insights. Focus on:
+
+1. Overall business health (score 0-100)
+2. Revenue and expense trends (month-over-month comparison)
+3. Strengths the business should leverage
+4. Concerns that need attention
+5. Specific, actionable recommendations
+
+Nigerian context:
+- Consider seasonal patterns (e.g. December spending spike, January slow-down)
+- Factor in Naira inflation when comparing periods
+- Reference common SMB challenges: generator costs, logistics, staff retention
+- Be practical — recommend things a Nigerian SMB owner can actually do this week
+
+Keep language warm and encouraging. Nigerian entrepreneurs work hard — acknowledge that.
+
+RESPONSE FORMAT — valid JSON only:
+{
+  "health_score": 0,
+  "summary": "",
+  "strengths": [""],
+  "concerns": [""],
+  "actions": [""],
+  "trend": "improving|stable|declining",
+  "key_metric": ""
+}
+"""
+    import json
+    data_str = json.dumps(financial_data, indent=2, default=str)
+    user = f"Generate a {report_type} business health report from this data:\n\n{data_str}"
+    return system, user
+
+
+def build_tax_summary_prompt(financial_data: dict) -> tuple[str, str]:
+    """Generate a tax compliance summary from financial data."""
+    system = NIGERIAN_BASE_CONTEXT + """
+
+TAX COMPLIANCE ANALYSIS RULES:
+Analyze the user's financial data and provide a tax compliance summary.
+
+Nigerian tax obligations for SMBs:
+1. VAT (7.5%): Collected on taxable supplies, remitted monthly to FIRS by the 21st
+2. WHT (5% services, 10% rent/dividends): Deducted at source by payer
+3. CIT (Company Income Tax):
+   - Small companies (turnover < ₦25M): 0% CIT
+   - Medium companies (₦25M - ₦100M): 20% CIT
+   - Large companies (> ₦100M): 30% CIT
+4. PAYE: If they have employees, deduct and remit monthly
+5. Annual returns: Filed with CAC within 42 days of AGM
+
+Filing deadlines:
+- VAT: 21st of the following month
+- WHT: 21st of the following month
+- CIT: Within 6 months of year-end (or 18 months for new companies)
+
+RESPONSE FORMAT — valid JSON only:
+{
+  "period": "",
+  "total_revenue": 0.0,
+  "total_expenses": 0.0,
+  "vat_collected": 0.0,
+  "vat_payable": 0.0,
+  "wht_deducted": 0.0,
+  "estimated_cit": 0.0,
+  "cit_bracket": "",
+  "next_filing_deadlines": [],
+  "recommendations": [],
+  "compliance_score": 0
+}
+"""
+    import json
+    data_str = json.dumps(financial_data, indent=2, default=str)
+    user = f"Analyze this financial data for tax compliance:\n\n{data_str}"
+    return system, user

@@ -34,6 +34,13 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Business Plan",  callback_data="doc:business_plan"),
         ],
         [
+            InlineKeyboardButton("💰 Log Expense",    callback_data="action:expense"),
+            InlineKeyboardButton("📈 Dashboard",      callback_data="action:dashboard"),
+        ],
+        [
+            InlineKeyboardButton("🔍 Insights",       callback_data="action:insights"),
+        ],
+        [
             InlineKeyboardButton("⚙️ My Profile",     callback_data="menu:profile"),
             InlineKeyboardButton("💳 Upgrade",        callback_data="menu:upgrade"),
         ],
@@ -169,8 +176,8 @@ def confirm_keyboard(action: str = "generate") -> InlineKeyboardMarkup:
 
 def upgrade_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Pro — ₦4,999/month",        callback_data="upgrade:pro")],
-        [InlineKeyboardButton("🏆 Commander — ₦12,999/month", callback_data="upgrade:commander")],
+        [InlineKeyboardButton("⚡ Pro — ₦5,000/month",        callback_data="upgrade:pro")],
+        [InlineKeyboardButton("🏢 Business — ₦15,000/month",  callback_data="upgrade:business")],
         [InlineKeyboardButton("🔙 Back to Menu",              callback_data="menu:main")],
     ])
 
